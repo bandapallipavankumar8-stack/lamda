@@ -2,62 +2,55 @@ pipeline {
     agent any
     
     environment {
-        AWS_REGION       = 'ap-south-1' 
-        FUNCTION_NAME    = 'mumbai-express-lambda'
-        IAM_ROLE_ARN     = 'arn:aws:iam::123456789012:role/lambda-mumbai-execution-role' 
-        AWS_CREDS_ID     = 'aws-mumbai-credentials' 
+        // Define your deployment configurations
+        AWS_REGION      = 'ap-south-1' // Mumbai Region
+        LAMBDA_NAME     = 'my-lambda-function'
+        LAMBDA_HANDLER  = 'index.handler'  // e.g., filename.methodName
+        LAMBDA_RUNTIME  = 'nodejs18.x'    // Change based on your programming language
+        LAMBDA_ROLE_ARN = 'arn:aws:iam::123456789012:role/service-role/your-lambda-execution-role' // Replace with a basic Lambda execution role ARN
+        CREDENTIALS_ID  = 'aws-admin-creds' // Must match the ID configured in Jenkins Step 1
     }
-    
+
     stages {
         stage('Checkout Code') {
             steps {
+                // Pulls the main branch from your SCM
                 checkout scm
             }
         }
-        
+
         stage('Package Application') {
             steps {
-                echo 'Packaging Lambda code (excluding git history)...'
-                // Clean fix: Excludes bulky git configuration files from your lambda package
+                echo 'Packaging application files into ZIP configuration...'
+                // Excludes Jenkins configuration and hidden Git assets so zip error is avoided
                 sh 'zip -r lambda_function.zip . -x "*.git*" -x "Jenkinsfile"'
             }
         }
-        
+
         stage('Deploy to AWS Mumbai') {
             steps {
-                // Native block that works out of the box on all Jenkins instances
-                withCredentials([usernamePassword(credentialsId: "${AWS_CREDS_ID}", 
-                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY', 
-                                                  usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+                // Securely injects your Jenkins admin credentials
+                withAWS(credentials: "${CREDENTIALS_ID}", region: "${AWS_REGION}") {
                     script {
-                        // Injects credentials into your environment variables automatically
-                        env.AWS_DEFAULT_REGION = "${AWS_REGION}"
+                        echo 'Checking if Lambda function already exists...'
+                        def exists = sh(script: "aws lambda get-function --function-name ${LAMBDA_NAME} 2>&1", returnStatus: true)
                         
-                        echo "Checking if Lambda function '${FUNCTION_NAME}' exists in ${AWS_REGION}..."
-                        
-                        def status = sh(
-                            script: "aws lambda get-function --function-name ${FUNCTION_NAME} --region ${AWS_REGION}", 
-                            returnStatus: true
-                        )
-                        
-                        if (status != 0) {
-                            echo "Function not found. Creating a new Lambda function in Mumbai..."
+                        if (exists == 0) {
+                            echo "Lambda function exists. Updating code deployment..."
                             sh """
-                            aws lambda create-function \
-                                --region ${AWS_REGION} \
-                                --function-name ${FUNCTION_NAME} \
-                                --runtime python3.12 \
-                                --role ${IAM_ROLE_ARN} \
-                                --handler index.handler \
-                                --zip-file fileb://lambda_function.zip
+                                aws lambda update-function-code \
+                                    --function-name ${LAMBDA_NAME} \
+                                    --zip-file fileb://lambda_function.zip
                             """
                         } else {
-                            echo "Function found. Updating code for existing Lambda in Mumbai..."
+                            echo "Lambda function does not exist. Creating new function..."
                             sh """
-                            aws lambda update-function-code \
-                                --region ${AWS_REGION} \
-                                --function-name ${FUNCTION_NAME} \
-                                --zip-file fileb://lambda_function.zip
+                                aws lambda create-function \
+                                    --function-name ${LAMBDA_NAME} \
+                                    --runtime ${LAMBDA_RUNTIME} \
+                                    --role ${LAMBDA_ROLE_ARN} \
+                                    --handler ${LAMBDA_HANDLER} \
+                                    --zip-file fileb://lambda_function.zip
                             """
                         }
                     }
@@ -68,10 +61,10 @@ pipeline {
     
     post {
         success {
-            echo "Successfully deployed Lambda to AWS Mumbai (ap-south-1)!"
+            echo 'Deployment completed successfully!'
         }
         failure {
-            echo "Deployment failed. Check AWS IAM permissions or credentials."
+            echo 'Deployment failed. Check AWS configurations, workspace files, or your Jenkins AWS credential settings.'
         }
     }
 }
