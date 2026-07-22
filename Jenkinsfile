@@ -7,7 +7,7 @@ pipeline {
         LAMBDA_HANDLER  = 'index.handler'            // Points directly to root index.js
         LAMBDA_RUNTIME  = 'nodejs18.x'              // Node.js runtime environment
         ROLE_NAME       = 'jenkins-lambda-exec-role' // IAM Role name to be generated/used
-        CREDENTIALS_ID  = 'aws-admin-creds'          // The AWS credentials ID set up in Jenkins
+        CREDENTIALS_ID  = 'aws-admin-creds'          // Your Jenkins Username/Password or AWS Credential ID
     }
 
     stages {
@@ -20,16 +20,21 @@ pipeline {
         stage('Package Application') {
             steps {
                 echo 'Packaging application code into ZIP file...'
-                // This will correctly package index.js from the root directory
                 sh 'zip -r lambda_function.zip . -x "*.git*" -x "Jenkinsfile"'
             }
         }
 
         stage('Deploy to AWS Mumbai') {
             steps {
-                withAWS(credentials: "${CREDENTIALS_ID}", region: "${AWS_REGION}") {
+                // Uses Jenkins core credential binding instead of the withAWS plugin
+                withCredentials([usernamePassword(credentialsId: "${CREDENTIALS_ID}", 
+                                                 usernameVariable: 'AWS_ACCESS_KEY_ID', 
+                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     script {
-                        // Ensure an Execution Role exists for the Lambda function
+                        // Export region so AWS CLI uses it automatically
+                        env.AWS_DEFAULT_REGION = "${AWS_REGION}"
+
+                        // Step 1: Ensure an Execution Role exists for the Lambda function
                         echo 'Verifying IAM execution role...'
                         def roleCheck = sh(script: "aws iam get-role --role-name ${ROLE_NAME} 2>&1", returnStatus: true)
                         def roleArn = ""
@@ -42,13 +47,13 @@ pipeline {
                             sh "aws iam attach-role-policy --role-name ${ROLE_NAME} --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
                             
                             echo "Waiting for IAM Role propagation..."
-                            sleep(time: 10, unit: 'SECONDS')
+                            sleep(time: 15, unit: 'SECONDS')
                         }
                         
                         roleArn = sh(script: "aws iam get-role --role-name ${ROLE_NAME} --query 'Role.Arn' --output text", returnStdout: true).trim()
                         echo "Using Role ARN: ${roleArn}"
 
-                        // Deploy or update the Lambda function
+                        // Step 2: Deploy or update the Lambda function
                         echo 'Checking if Lambda function already exists...'
                         def lambdaCheck = sh(script: "aws lambda get-function --function-name ${LAMBDA_NAME} 2>&1", returnStatus: true)
                         
@@ -81,7 +86,7 @@ pipeline {
             echo 'Pipeline completed successfully. Code deployed to AWS Mumbai!'
         }
         failure {
-            echo 'Pipeline failed. Check workspace files, zip utilities, or AWS console permissions.'
+            echo 'Pipeline failed. Check workspace files or AWS configurations.'
         }
     }
 }
