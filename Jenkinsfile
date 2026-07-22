@@ -2,39 +2,39 @@ pipeline {
     agent any
     
     environment {
-        // Targets the AWS Mumbai Region
         AWS_REGION       = 'ap-south-1' 
         FUNCTION_NAME    = 'mumbai-express-lambda'
-        // Replace with your actual AWS IAM Role ARN
         IAM_ROLE_ARN     = 'arn:aws:iam::123456789012:role/lambda-mumbai-execution-role' 
-        // Name of the credentials configured in Jenkins Credentials Provider
         AWS_CREDS_ID     = 'aws-mumbai-credentials' 
     }
     
     stages {
         stage('Checkout Code') {
             steps {
-                // Pulls your application code from GitHub/GitLab
                 checkout scm
             }
         }
         
         stage('Package Application') {
             steps {
-                echo 'Packaging Lambda code into a deployment zip file...'
-                // Zips the workspace directory contents for deployment
-                sh 'zip -r lambda_function.zip .'
+                echo 'Packaging Lambda code (excluding git history)...'
+                // Clean fix: Excludes bulky git configuration files from your lambda package
+                sh 'zip -r lambda_function.zip . -x "*.git*" -x "Jenkinsfile"'
             }
         }
         
         stage('Deploy to AWS Mumbai') {
             steps {
-                // Wrapper to inject your AWS Access Keys safely
-                withAWS(region: "${AWS_REGION}", credentials: "${AWS_CREDS_ID}") {
+                // Native block that works out of the box on all Jenkins instances
+                withCredentials([usernamePassword(credentialsId: "${AWS_CREDS_ID}", 
+                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY', 
+                                                  usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
                     script {
-                        echo "Checking if Lambda function '${FUNCTION_NAME}' exists in ap-south-1..."
+                        // Injects credentials into your environment variables automatically
+                        env.AWS_DEFAULT_REGION = "${AWS_REGION}"
                         
-                        // Check function status without failing the build if it doesn't exist
+                        echo "Checking if Lambda function '${FUNCTION_NAME}' exists in ${AWS_REGION}..."
+                        
                         def status = sh(
                             script: "aws lambda get-function --function-name ${FUNCTION_NAME} --region ${AWS_REGION}", 
                             returnStatus: true
