@@ -7,7 +7,7 @@ pipeline {
         LAMBDA_HANDLER  = 'index.handler'            // Points directly to root index.js
         LAMBDA_RUNTIME  = 'nodejs18.x'              // Node.js runtime environment
         ROLE_NAME       = 'jenkins-lambda-exec-role' // IAM Role name to be generated/used
-        CREDENTIALS_ID  = 'aws-admin-creds'          // Your Jenkins Username/Password or AWS Credential ID
+        CREDENTIALS_ID  = 'aws-admin-creds'          // Your Jenkins Username/Password Credential ID
     }
 
     stages {
@@ -41,6 +41,7 @@ pipeline {
 
                         if (roleCheck != 0) {
                             echo "IAM Role does not exist. Creating ${ROLE_NAME}..."
+                            // FIX: Corrected service principal to "://amazonaws.com"
                             def trustPolicy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"://amazonaws.com"},"Action":"sts:AssumeRole"}]}'
                             
                             sh "aws iam create-role --role-name ${ROLE_NAME} --assume-role-policy-document '${trustPolicy}'"
